@@ -1,0 +1,6 @@
+{
+  "name": "Google Sheets Tilda Catalog Widget",
+  "description": "Dynamic catalog widget for Tilda synchronized with Google Sheets in real-time, featuring CSV/YML exports and custom server-side SEO meta tags.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
