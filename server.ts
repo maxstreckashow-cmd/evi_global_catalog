@@ -10,6 +10,22 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
 app.use(express.json({ limit: "50mb" }));
 
+// Enable CORS & Frame permissions for Widget embedding
+app.use((req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, PATCH, DELETE");
+  res.setHeader("Access-Control-Allow-Headers", "X-Requested-With,content-type,Authorization");
+  res.setHeader("Access-Control-Allow-Credentials", "true");
+  
+  // Expose headers for any frame embedder to allow custom sizing and control
+  res.setHeader("X-Frame-Options", "ALLOWALL"); // Allow framing by any site (like Tilda)
+  
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
 // Explicit route for Yandex verification file
 app.get("/yandex_dd6f3e1c22ddbc80.html", (req, res) => {
   res.setHeader("Content-Type", "text/html; charset=UTF-8");
@@ -84,6 +100,43 @@ interface PriceCorrection {
   model?: string;
   algorithm?: string;
   condition?: string;
+}
+
+const SEO_FILE = path.resolve(".", "seo_overrides.json");
+
+interface SeoOverride {
+  title?: string;
+  description?: string;
+  keywords?: string;
+  ogTitle?: string;
+  ogDescription?: string;
+  ogImage?: string;
+}
+
+function getSeoOverrides(): Record<string, SeoOverride> {
+  try {
+    if (fs.existsSync(SEO_FILE)) {
+      const data = fs.readFileSync(SEO_FILE, "utf-8");
+      return JSON.parse(data);
+    }
+  } catch (error) {
+    console.error("Error reading SEO overrides:", error);
+  }
+  return {};
+}
+
+function saveSeoOverride(slug: string, override: SeoOverride | null) {
+  try {
+    const overrides = getSeoOverrides();
+    if (override) {
+      overrides[slug] = override;
+    } else {
+      delete overrides[slug];
+    }
+    fs.writeFileSync(SEO_FILE, JSON.stringify(overrides, null, 2), "utf-8");
+  } catch (error) {
+    console.error("Error saving SEO override:", error);
+  }
 }
 
 function getPriceCorrections(): Record<string, PriceCorrection> {
@@ -431,9 +484,18 @@ Provide your output in valid, strict JSON matching the schema precisely. Determi
   return null;
 }
 
+interface PreorderParsedRow {
+  rowMfr: string;
+  rowModel: string;
+  rowHashText: string;
+  rowHashClean: string;
+  rowHashNum: number;
+  paybackVal: string;
+}
+
 let productsCache: Product[] = [];
 let cacheTimestamp = 0;
-const CACHE_DURATION_MS = 30000; // 30 seconds cache
+const CACHE_DURATION_MS = 10 * 60 * 1000; // 10 minutes cache
 
 const SPREADSHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/12TtXAVyKBj1yGnO8Zbw8UcCPB-ks0nJ-ONN5pZmH3vg/export?format=csv&sheet=%D0%94%D0%BB%D1%8F%20%D1%81%D0%B0%D0%B9%D1%82%D0%B0";
 
@@ -566,25 +628,37 @@ async function getProducts(): Promise<Product[]> {
   }
 
   try {
-    const response = await fetch(SPREADSHEET_CSV_URL);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch spreadsheet: ${response.statusText}`);
+    const PREORDER_CSV_URL = "https://docs.google.com/spreadsheets/d/12TtXAVyKBj1yGnO8Zbw8UcCPB-ks0nJ-ONN5pZmH3vg/export?format=csv&gid=52943044";
+
+    // Fetch both spreadsheet sheets in parallel to slash network latency in half
+    const [mainRes, preorderRes] = await Promise.all([
+      fetch(SPREADSHEET_CSV_URL).catch(e => {
+        console.error("Error fetching main spreadsheet:", e);
+        return null;
+      }),
+      fetch(PREORDER_CSV_URL).catch(e => {
+        console.error("Error fetching preorder spreadsheet:", e);
+        return null;
+      })
+    ]);
+
+    if (!mainRes || !mainRes.ok) {
+      throw new Error(`Failed to fetch main spreadsheet: ${mainRes ? mainRes.statusText : 'Network error'}`);
     }
-    const csvData = await response.text();
+
+    const csvData = await mainRes.text();
     const results = Papa.parse<string[]>(csvData, { skipEmptyLines: true });
 
-    // Fetch and parse preorder sheet for payback periods
     let preorderRows: string[][] = [];
+    let parsedPreorderRows: PreorderParsedRow[] = [];
     let preorderMfrColIdx = 1; // Default B
     let preorderModelColIdx = 2; // Default C
     let preorderHashColIdx = 3; // Default D
     let preorderPaybackColIdx = 15; // Default P (0-indexed 15)
     let preorderHeaderIdx = -1;
 
-    try {
-      const PREORDER_CSV_URL = "https://docs.google.com/spreadsheets/d/12TtXAVyKBj1yGnO8Zbw8UcCPB-ks0nJ-ONN5pZmH3vg/export?format=csv&gid=52943044";
-      const preorderRes = await fetch(PREORDER_CSV_URL);
-      if (preorderRes.ok) {
+    if (preorderRes && preorderRes.ok) {
+      try {
         const preorderCsv = await preorderRes.text();
         const preorderParsed = Papa.parse<string[]>(preorderCsv, { skipEmptyLines: true });
         if (preorderParsed.data && preorderParsed.data.length > 0) {
@@ -613,13 +687,43 @@ async function getProducts(): Promise<Product[]> {
             const foundPayback = headerRow.findIndex(c => c && (c.toLowerCase().includes("окупаемость") || c.toLowerCase().includes("окупаемости")));
             if (foundPayback !== -1) preorderPaybackColIdx = foundPayback;
           }
+
+          // Pre-parse preorder rows for O(1) attribute access to avoid repetitive CPU-heavy regex and string transforms
+          const startRowIdx = preorderHeaderIdx !== -1 ? preorderHeaderIdx + 1 : 0;
+          const cleanHash = (val: string) => val.toLowerCase().replace(/[^0-9.]/g, "").replace(/\.0+$/, "");
+          
+          for (let r = startRowIdx; r < preorderRows.length; r++) {
+            const pRow = preorderRows[r];
+            if (!pRow) continue;
+
+            const rawMfr = (preorderMfrColIdx !== -1 && pRow[preorderMfrColIdx]) ? pRow[preorderMfrColIdx].trim() : "";
+            const rawModel = (preorderModelColIdx !== -1 && pRow[preorderModelColIdx]) ? pRow[preorderModelColIdx].trim() : "";
+            const rowHashText = (preorderHashColIdx !== -1 && pRow[preorderHashColIdx]) ? pRow[preorderHashColIdx].trim() : "";
+
+            if (!rawMfr && !rawModel) continue; // skip empty helper rows
+
+            const rowMfrClean = rawMfr.toLowerCase().replace(/[^a-z0-9]/g, "");
+            const rowModelClean = rawModel.toLowerCase().replace(/[^a-z0-9]/g, "");
+            const rowHashClean = cleanHash(rowHashText);
+            const rowHashNum = parseFloat(rowHashClean) || 0;
+            const pbVal = (preorderPaybackColIdx !== -1 && pRow[preorderPaybackColIdx]) ? pRow[preorderPaybackColIdx].trim() : "";
+
+            parsedPreorderRows.push({
+              rowMfr: rowMfrClean,
+              rowModel: rowModelClean,
+              rowHashText,
+              rowHashClean,
+              rowHashNum,
+              paybackVal: pbVal
+            });
+          }
         }
+      } catch (err) {
+        console.error("Error parsing preorder sheet:", err);
       }
-    } catch (err) {
-      console.error("Error fetching or parsing preorder sheet:", err);
     }
 
-    // Find the header row
+    // Find the header row in main catalog sheet
     let headerIdx = -1;
     for (let i = 0; i < results.data.length; i++) {
       const r = results.data[i];
@@ -648,6 +752,8 @@ async function getProducts(): Promise<Product[]> {
     let currentMfr = "";
     let currentModel = "";
     let currentAlgo = "";
+
+    const cleanHash = (val: string) => val.toLowerCase().replace(/[^0-9.]/g, "").replace(/\.0+$/, "");
 
     for (let i = headerIdx + 1; i < results.data.length; i++) {
       const row = results.data[i];
@@ -691,59 +797,50 @@ async function getProducts(): Promise<Product[]> {
       const cleanPrice = getCleanPrices(currentMfr, currentModel, hashValue, priceUsdRaw, priceRubRaw);
       
       let matchedPayback = parsePayback(currentMfr, "", cleanPrice.usdNumeric);
-      if (preorderRows.length > 0) {
+      if (parsedPreorderRows.length > 0) {
         let bestScore = 0;
         let bestPaybackVal = "";
-        const startRowIdx = preorderHeaderIdx !== -1 ? preorderHeaderIdx + 1 : 0;
         
         const targetMfr = currentMfr.toLowerCase().replace(/[^a-z0-9]/g, "");
         const targetModel = currentModel.toLowerCase().replace(/[^a-z0-9]/g, "");
         
-        const cleanHash = (val: string) => val.toLowerCase().replace(/[^0-9.]/g, "").replace(/\.0+$/, "");
         const targetHashClean = cleanHash(hashValue);
         const targetHashNum = parseFloat(targetHashClean) || 0;
 
-        for (let r = startRowIdx; r < preorderRows.length; r++) {
-          const pRow = preorderRows[r];
-          if (!pRow) continue;
-
-          const rowMfr = (preorderMfrColIdx !== -1 && pRow[preorderMfrColIdx]) ? pRow[preorderMfrColIdx].trim().toLowerCase().replace(/[^a-z0-9]/g, "") : "";
-          const rowModel = (preorderModelColIdx !== -1 && pRow[preorderModelColIdx]) ? pRow[preorderModelColIdx].trim().toLowerCase().replace(/[^a-z0-9]/g, "") : "";
-          const rowHashText = (preorderHashColIdx !== -1 && pRow[preorderHashColIdx]) ? pRow[preorderHashColIdx].trim() : "";
-          const rowHashClean = cleanHash(rowHashText);
-          const rowHashNum = parseFloat(rowHashClean) || 0;
+        for (let r = 0; r < parsedPreorderRows.length; r++) {
+          const pRow = parsedPreorderRows[r];
 
           // Check if manufacturer matches
-          if (rowMfr && targetMfr) {
-            if (rowMfr !== targetMfr && !targetMfr.includes(rowMfr) && !rowMfr.includes(targetMfr)) {
+          if (pRow.rowMfr && targetMfr) {
+            if (pRow.rowMfr !== targetMfr && !targetMfr.includes(pRow.rowMfr) && !pRow.rowMfr.includes(targetMfr)) {
               continue; // manufacturer mismatch
             }
           }
 
           // Check if model matches
-          if (rowModel && targetModel) {
-            if (rowModel !== targetModel && !targetModel.includes(rowModel) && !rowModel.includes(targetModel)) {
+          if (pRow.rowModel && targetModel) {
+            if (pRow.rowModel !== targetModel && !targetModel.includes(pRow.rowModel) && !pRow.rowModel.includes(targetModel)) {
               continue; // model mismatch
             }
           }
 
           let score = 0;
-          if (rowMfr === targetMfr) score += 10;
-          if (rowModel === targetModel) score += 40;
+          if (pRow.rowMfr === targetMfr) score += 10;
+          if (pRow.rowModel === targetModel) score += 40;
 
-          if (targetHashClean && rowHashClean) {
-            if (targetHashClean === rowHashClean) {
+          if (targetHashClean && pRow.rowHashClean) {
+            if (targetHashClean === pRow.rowHashClean) {
               score += 50;
-            } else if (targetHashNum && rowHashNum && Math.abs(targetHashNum - rowHashNum) < 0.01) {
+            } else if (targetHashNum && pRow.rowHashNum && Math.abs(targetHashNum - pRow.rowHashNum) < 0.01) {
               score += 50;
-            } else if (targetHashNum && rowHashNum && Math.abs(targetHashNum - rowHashNum) / targetHashNum < 0.05) {
+            } else if (targetHashNum && pRow.rowHashNum && Math.abs(targetHashNum - pRow.rowHashNum) / targetHashNum < 0.05) {
               score += 30;
             }
           }
 
           if (score > bestScore && score >= 50) {
-            const pbVal = pRow[preorderPaybackColIdx] || "";
-            if (pbVal && pbVal.trim() !== "" && !pbVal.includes("#VALUE!") && !pbVal.includes("отсутствует") && !pbVal.includes("#N/A")) {
+            const pbVal = pRow.paybackVal;
+            if (pbVal && pbVal !== "" && !pbVal.includes("#VALUE!") && !pbVal.includes("отсутствует") && !pbVal.includes("#N/A")) {
               bestScore = score;
               const numMatch = pbVal.match(/\d+/);
               bestPaybackVal = numMatch ? numMatch[0] : pbVal.replace(/[^0-9]/g, "");
@@ -1010,6 +1107,30 @@ app.get("/api/products/:slug", async (req, res) => {
   res.json(product);
 });
 
+app.get("/api/seo-overrides", (req, res) => {
+  res.json(getSeoOverrides());
+});
+
+app.post("/api/seo-overrides/:slug", (req, res) => {
+  const { slug } = req.params;
+  if (!slug) {
+    return res.status(400).json({ error: "Missing slug" });
+  }
+  saveSeoOverride(slug, req.body);
+  cacheTimestamp = 0; // force cache invalidate
+  res.json({ success: true });
+});
+
+app.delete("/api/seo-overrides/:slug", (req, res) => {
+  const { slug } = req.params;
+  if (!slug) {
+    return res.status(400).json({ error: "Missing slug" });
+  }
+  saveSeoOverride(slug, null);
+  cacheTimestamp = 0; // force cache invalidate
+  res.json({ success: true });
+});
+
 app.get("/api/config", (req, res) => {
   res.json(getSiteConfig());
 });
@@ -1233,8 +1354,21 @@ async function startServer() {
   // Pre-fetch cache immediately on startup
   await getProducts();
 
+  // Background auto-sync every 5 minutes to keep the catalog cache perpetually warm and fresh
+  setInterval(async () => {
+    try {
+      console.log("[Background Sync] Refreshing Google Sheets cache in background...");
+      cacheTimestamp = 0; // Invalidate current cache
+      await getProducts(); // This parses and caches both sheets in parallel
+      console.log("[Background Sync] Successfully refreshed Google Sheets cache.");
+    } catch (err) {
+      console.error("[Background Sync] Error updating product cache in background:", err);
+    }
+  }, 5 * 60 * 1000); // 5 minutes interval
+
   // Vite integration
-  if (process.env.NODE_ENV !== "production") {
+  const isProd = process.env.NODE_ENV === "production" || (process.argv[1] && !process.argv[1].endsWith("server.ts"));
+  if (!isProd) {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
@@ -1255,22 +1389,30 @@ async function startServer() {
             let template = fs.readFileSync(path.resolve(".", "index.html"), "utf-8");
             template = await vite.transformIndexHtml(req.originalUrl, template);
 
-            const seoTitle = `Купить ASIC-майнер ${product.manufacturer} ${product.model} ${product.hashrate ? product.hashrate + " TH/s" : ""} - лучшая цена | EVI Global Group`;
-            const seoDesc = `Официальные оптовые поставки ASIC-майнера ${product.manufacturer} ${product.model} (${product.condition === 'New' ? 'новый' : 'Б/У'}) на алгоритме ${product.algorithm} с хэшрейтом ${product.hashrate} TH/s. Потребление: ${product.power} кВт. Минимальный заказ от 30 устройств напрямую от производителя. Актуальные цены, быстрая доставка и профессиональный подбор в EVI Global Group.`;
-            const seoKeywords = `asic майнер, купить ${product.manufacturer} ${product.model}, ${product.manufacturer} ${product.model} цена, ${product.algorithm} майнер, майнинг оборудование оптом, купить асики от 30 шт, evi global group, окупаемость майнера ${product.payback} месяцев`;
+            const overrides = getSeoOverrides();
+            const override = overrides[product.slug] || {};
+
+            const seoTitle = override.title || `Купить ASIC-майнер ${product.manufacturer} ${product.model} ${product.hashrate ? product.hashrate + " TH/s" : ""} - лучшая цена | EVI Global Group`;
+            const seoDesc = override.description || `Официальные оптовые поставки ASIC-майнера ${product.manufacturer} ${product.model} (${product.condition === 'New' ? 'новый' : 'Б/У'}) на алгоритме ${product.algorithm} с хэшрейтом ${product.hashrate} TH/s. Потребление: ${product.power} кВт. Минимальный заказ от 30 устройств напрямую от производителя. Актуальные цены, быстрая доставка и профессиональный подбор в EVI Global Group.`;
+            const seoKeywords = override.keywords || `asic майнер, купить ${product.manufacturer} ${product.model}, ${product.manufacturer} ${product.model} цена, ${product.algorithm} майнер, майнинг оборудование оптом, купить асики от 30 шт, evi global group, окупаемость майнера ${product.payback} месяцев`;
+            const ogTitle = override.ogTitle || seoTitle;
+            const ogDesc = override.ogDescription || seoDesc;
+            const ogImg = override.ogImage || (product.imageUrl || "");
 
             // Inject custom SEO head tags
             const seoMeta = `
               <title>${seoTitle}</title>
               <meta name="description" content="${seoDesc}" />
               <meta name="keywords" content="${seoKeywords}" />
-              <meta property="og:title" content="${seoTitle}" />
-              <meta property="og:description" content="${seoDesc}" />
+              <meta property="og:title" content="${ogTitle}" />
+              <meta property="og:description" content="${ogDesc}" />
               <meta property="og:type" content="product" />
-              <meta property="og:url" content="${process.env.APP_URL || 'http://localhost:3000'}/product/${product.slug}" />
+              <meta property="og:url" content="${(process.env.APP_URL || '').replace(/\/$/, '') || 'http://localhost:3000'}/product/${product.slug}" />
+              ${ogImg ? `<meta property="og:image" content="${ogImg}" />` : ''}
               <meta name="twitter:card" content="summary_large_image" />
-              <meta name="twitter:title" content="${seoTitle}" />
-              <meta name="twitter:description" content="${seoDesc}" />
+              <meta name="twitter:title" content="${ogTitle}" />
+              <meta name="twitter:description" content="${ogDesc}" />
+              ${ogImg ? `<meta name="twitter:image" content="${ogImg}" />` : ''}
             `;
 
             // Replace standard title or insert in head
@@ -1291,7 +1433,9 @@ async function startServer() {
     });
   } else {
     // Production Mode serving static files
-    const distPath = path.join(process.cwd(), "dist");
+    const distPath = typeof __dirname !== "undefined" && __dirname.endsWith("dist")
+      ? __dirname
+      : path.join(process.cwd(), "dist");
     
     // Custom SEO Dynamic Middleware for PROD
     app.get("/product/:slug", async (req, res) => {
@@ -1303,21 +1447,29 @@ async function startServer() {
         try {
           let template = fs.readFileSync(path.join(distPath, "index.html"), "utf-8");
 
-          const seoTitle = `Купить ASIC-майнер ${product.manufacturer} ${product.model} ${product.hashrate ? product.hashrate + " TH/s" : ""} - лучшая цена | EVI Global Group`;
-          const seoDesc = `Официальные оптовые поставки ASIC-майнера ${product.manufacturer} ${product.model} (${product.condition === 'New' ? 'новый' : 'Б/У'}) на алгоритме ${product.algorithm} с хэшрейтом ${product.hashrate} TH/s. Потребление: ${product.power} кВт. Минимальный заказ от 30 устройств напрямую от производителя. Актуальные цены, быстрая доставка и профессиональный подбор в EVI Global Group.`;
-          const seoKeywords = `asic майнер, купить ${product.manufacturer} ${product.model}, ${product.manufacturer} ${product.model} цена, ${product.algorithm} майнер, майнинг оборудование оптом, купить асики от 30 шт, evi global group, окупаемость майнера ${product.payback} месяцев`;
+          const overrides = getSeoOverrides();
+          const override = overrides[product.slug] || {};
+
+          const seoTitle = override.title || `Купить ASIC-майнер ${product.manufacturer} ${product.model} ${product.hashrate ? product.hashrate + " TH/s" : ""} - лучшая цена | EVI Global Group`;
+          const seoDesc = override.description || `Официальные оптовые поставки ASIC-майнера ${product.manufacturer} ${product.model} (${product.condition === 'New' ? 'новый' : 'Б/У'}) на алгоритме ${product.algorithm} с хэшрейтом ${product.hashrate} TH/s. Потребление: ${product.power} кВт. Минимальный заказ от 30 устройств напрямую от производителя. Актуальные цены, быстрая доставка и профессиональный подбор в EVI Global Group.`;
+          const seoKeywords = override.keywords || `asic майнер, купить ${product.manufacturer} ${product.model}, ${product.manufacturer} ${product.model} цена, ${product.algorithm} майнер, майнинг оборудование оптом, купить асики от 30 шт, evi global group, окупаемость майнера ${product.payback} месяцев`;
+          const ogTitle = override.ogTitle || seoTitle;
+          const ogDesc = override.ogDescription || seoDesc;
+          const ogImg = override.ogImage || (product.imageUrl || "");
 
           const seoMeta = `
             <title>${seoTitle}</title>
             <meta name="description" content="${seoDesc}" />
             <meta name="keywords" content="${seoKeywords}" />
-            <meta property="og:title" content="${seoTitle}" />
-            <meta property="og:description" content="${seoDesc}" />
+            <meta property="og:title" content="${ogTitle}" />
+            <meta property="og:description" content="${ogDesc}" />
             <meta property="og:type" content="product" />
-            <meta property="og:url" content="${process.env.APP_URL}/product/${product.slug}" />
+            <meta property="og:url" content="${(process.env.APP_URL || '').replace(/\/$/, '') || 'http://localhost:3000'}/product/${product.slug}" />
+            ${ogImg ? `<meta property="og:image" content="${ogImg}" />` : ''}
             <meta name="twitter:card" content="summary_large_image" />
-            <meta name="twitter:title" content="${seoTitle}" />
-            <meta name="twitter:description" content="${seoDesc}" />
+            <meta name="twitter:title" content="${ogTitle}" />
+            <meta name="twitter:description" content="${ogDesc}" />
+            ${ogImg ? `<meta name="twitter:image" content="${ogImg}" />` : ''}
           `;
 
           const htmlWithSEO = template

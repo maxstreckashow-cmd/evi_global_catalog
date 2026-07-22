@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from "react";
-import { Product, FilterState } from "./types";
+import { Product, FilterState, SeoOverride } from "./types";
 import { SidebarFilters } from "./components/SidebarFilters";
 import { ProductCard } from "./components/ProductCard";
 import { ProductDetails } from "./components/ProductDetails";
@@ -10,6 +10,7 @@ import { CompareModal } from "./components/CompareModal";
 import { EviLogo } from "./components/EviLogo";
 import { AdminLogoManager } from "./components/AdminLogoManager";
 import { ProductPriceManager } from "./components/ProductPriceManager";
+import { AdminSeoManager } from "./components/AdminSeoManager";
 import { AboutUs } from "./components/AboutUs";
 import { LegalDocs } from "./components/LegalDocs";
 import { ContactsView } from "./components/ContactsView";
@@ -29,7 +30,8 @@ import {
   Menu,
   X,
   ExternalLink,
-  DollarSign
+  DollarSign,
+  Globe
 } from "lucide-react";
 
 declare global {
@@ -71,7 +73,7 @@ export default function App() {
     window.location.pathname === "/admin" || window.location.pathname === "/editor" || window.location.search.includes("admin=true")
   );
   
-  const [adminTab, setAdminTab] = useState<"tilda" | "images" | "logos" | "parser" | "catalog_preview" | "prices">("tilda");
+  const [adminTab, setAdminTab] = useState<"tilda" | "images" | "logos" | "parser" | "catalog_preview" | "prices" | "seo">("tilda");
   const [syncTime, setSyncTime] = useState<string>("");
 
   // Client pages state
@@ -81,6 +83,7 @@ export default function App() {
 
   const [comparedSlugs, setComparedSlugs] = useState<string[]>([]);
   const [isCompareModalOpen, setIsCompareModalOpen] = useState<boolean>(false);
+  const [seoOverrides, setSeoOverrides] = useState<Record<string, SeoOverride>>({});
   
   const [filters, setFilters] = useState<FilterState>({
     search: "",
@@ -200,10 +203,23 @@ export default function App() {
     }
   };
 
+  const loadSeoOverrides = async () => {
+    try {
+      const res = await fetch("/api/seo-overrides");
+      if (res.ok) {
+        const data = await res.json();
+        setSeoOverrides(data || {});
+      }
+    } catch (e) {
+      console.error("Error loading SEO overrides:", e);
+    }
+  };
+
   // Load products and handle deep-linked product URLs
   useEffect(() => {
     loadData();
     loadLogoConfig();
+    loadSeoOverrides();
 
     // Support browser Back/Forward routing
     const handlePopState = () => {
@@ -226,6 +242,70 @@ export default function App() {
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
+
+  // Dynamically update document head when selected product or SEO overrides change
+  useEffect(() => {
+    if (selectedProduct) {
+      const override = seoOverrides[selectedProduct.slug] || {};
+      const title = override.title || `Купить ASIC-майнер ${selectedProduct.manufacturer} ${selectedProduct.model} ${selectedProduct.hashrate ? selectedProduct.hashrate + " TH/s" : ""} - лучшая цена | EVI Global Group`;
+      const desc = override.description || `Официальные оптовые поставки ASIC-майнера ${selectedProduct.manufacturer} ${selectedProduct.model} (${selectedProduct.condition === 'New' ? 'новый' : 'Б/У'}) на алгоритме ${selectedProduct.algorithm} с хэшрейтом ${selectedProduct.hashrate} TH/s. Потребление: ${selectedProduct.power} кВт. Минимальный заказ от 30 устройств напрямую от производителя.`;
+      const keywords = override.keywords || `asic майнер, купить ${selectedProduct.manufacturer} ${selectedProduct.model}, ${selectedProduct.manufacturer} ${selectedProduct.model} цена, ${selectedProduct.algorithm} майнер, майнинг оборудование оптом, купить асики от 30 шт, evi global group, окупаемость майнера ${selectedProduct.payback} месяцев`;
+
+      // Update client-side head
+      document.title = title;
+      
+      // Update meta description
+      let metaDesc = document.querySelector('meta[name="description"]');
+      if (!metaDesc) {
+        metaDesc = document.createElement('meta');
+        metaDesc.setAttribute('name', 'description');
+        document.head.appendChild(metaDesc);
+      }
+      metaDesc.setAttribute('content', desc);
+
+      // Update meta keywords
+      let metaKeywords = document.querySelector('meta[name="keywords"]');
+      if (!metaKeywords) {
+        metaKeywords = document.createElement('meta');
+        metaKeywords.setAttribute('name', 'keywords');
+        document.head.appendChild(metaKeywords);
+      }
+      metaKeywords.setAttribute('content', keywords);
+
+      // Update og:title
+      let metaOgTitle = document.querySelector('meta[property="og:title"]');
+      if (!metaOgTitle) {
+        metaOgTitle = document.createElement('meta');
+        metaOgTitle.setAttribute('property', 'og:title');
+        document.head.appendChild(metaOgTitle);
+      }
+      metaOgTitle.setAttribute('content', override.ogTitle || title);
+
+      // Update og:description
+      let metaOgDesc = document.querySelector('meta[property="og:description"]');
+      if (!metaOgDesc) {
+        metaOgDesc = document.createElement('meta');
+        metaOgDesc.setAttribute('property', 'og:description');
+        document.head.appendChild(metaOgDesc);
+      }
+      metaOgDesc.setAttribute('content', override.ogDescription || desc);
+
+      // Update og:image
+      const ogImg = override.ogImage || selectedProduct.imageUrl;
+      if (ogImg) {
+        let metaOgImg = document.querySelector('meta[property="og:image"]');
+        if (!metaOgImg) {
+          metaOgImg = document.createElement('meta');
+          metaOgImg.setAttribute('property', 'og:image');
+          document.head.appendChild(metaOgImg);
+        }
+        metaOgImg.setAttribute('content', ogImg);
+      }
+    } else {
+      // Default general title
+      document.title = "Каталог ASIC-майнеров | EVI Global Group";
+    }
+  }, [selectedProduct, seoOverrides]);
 
   // Update selected product when catalog list updates (if popstate happens before products load)
   useEffect(() => {
@@ -439,6 +519,17 @@ export default function App() {
               Управление товарами и ценами
             </button>
             <button
+              onClick={() => setAdminTab("seo")}
+              className={`flex items-center gap-2 border-b-2 px-6 py-3.5 text-xs font-bold uppercase tracking-wider transition-all cursor-pointer shrink-0 ${
+                adminTab === "seo"
+                  ? "border-[#D3A76C] text-[#D3A76C]"
+                  : "border-transparent text-zinc-400 hover:border-zinc-800 hover:text-white"
+              }`}
+            >
+              <Globe className="h-4 w-4" />
+              Управление SEO-тегами
+            </button>
+            <button
               onClick={() => setAdminTab("catalog_preview")}
               className={`flex items-center gap-2 border-b-2 px-6 py-3.5 text-xs font-bold uppercase tracking-wider transition-all cursor-pointer shrink-0 ${
                 adminTab === "catalog_preview"
@@ -481,6 +572,8 @@ export default function App() {
               products={products} 
               onRefreshProducts={handleForceRefresh} 
             />
+          ) : adminTab === "seo" ? (
+            <AdminSeoManager products={products} onRefreshSeo={loadSeoOverrides} />
           ) : (
             <div>
               <div className="mb-4 rounded border border-[#D3A76C]/20 bg-[#D3A76C]/5 p-4 text-xs text-zinc-300 flex items-center justify-between">

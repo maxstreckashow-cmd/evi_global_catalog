@@ -25,3 +25,12 @@ export interface FilterState {
   algorithm: string;
   hasPrice: boolean;
 }
+
+export interface SeoOverride {
+  title?: string;
+  description?: string;
+  keywords?: string;
+  ogTitle?: string;
+  ogDescription?: string;
+  ogImage?: string;
+}
