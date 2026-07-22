@@ -37,6 +37,12 @@ app.get("/yandex_dd6f3e1c22ddbc80.html", (req, res) => {
 </html>`);
 });
 
+// Explicit route for Google verification file
+app.get("/googlecc41abc00d0391fc.html", (req, res) => {
+  res.setHeader("Content-Type", "text/html; charset=UTF-8");
+  res.send("google-site-verification: googlecc41abc00d0391fc.html");
+});
+
 // Dynamic Cache for Spreadsheet Data
 interface Product {
   manufacturer: string;
