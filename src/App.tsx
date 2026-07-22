@@ -315,7 +315,7 @@ export default function App() {
 
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
-  }, [products]);
+  }, []);
 
   // Dynamically update document head when selected product or SEO overrides change
   useEffect(() => {

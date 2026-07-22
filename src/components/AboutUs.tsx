@@ -26,7 +26,7 @@ export const AboutUs: React.FC = () => {
       {/* Corporate Metrics Bento Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="rounded-xl border border-zinc-900 bg-zinc-950/40 p-6 text-center">
-          <p className="text-3xl md:text-4xl font-black text-[#D3A76C] font-mono">150+ МВт</p>
+          <p className="text-3xl md:text-4xl font-black text-[#D3A76C] font-mono">300+ МВт</p>
           <p className="text-[10px] text-zinc-500 uppercase tracking-widest font-mono mt-1">Общая мощность ДЦ</p>
         </div>
         <div className="rounded-xl border border-zinc-900 bg-zinc-950/40 p-6 text-center">
