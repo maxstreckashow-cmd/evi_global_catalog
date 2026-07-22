@@ -1141,6 +1141,58 @@ app.get("/api/config", (req, res) => {
   res.json(getSiteConfig());
 });
 
+app.get("/api/admin/backup/export", (req, res) => {
+  try {
+    const backupData = {
+      site_config: getSiteConfig(),
+      product_images: getSavedImages(),
+      price_corrections: getPriceCorrections(),
+      seo_overrides: getSeoOverrides(),
+      custom_products: getCustomProducts(),
+      product_details_enriched: getEnrichedDetails(),
+      timestamp: Date.now()
+    };
+    res.json(backupData);
+  } catch (error: any) {
+    res.status(500).json({ error: "Failed to export backup: " + error.message });
+  }
+});
+
+app.post("/api/admin/backup/import", (req, res) => {
+  try {
+    const backup = req.body;
+    if (!backup) {
+      return res.status(400).json({ error: "Empty backup data" });
+    }
+
+    if (backup.site_config) {
+      saveSiteConfig(backup.site_config);
+    }
+    if (backup.product_images) {
+      fs.writeFileSync(IMAGES_FILE, JSON.stringify(backup.product_images, null, 2), "utf-8");
+    }
+    if (backup.price_corrections) {
+      fs.writeFileSync(CORRECTIONS_FILE, JSON.stringify(backup.price_corrections, null, 2), "utf-8");
+    }
+    if (backup.seo_overrides) {
+      fs.writeFileSync(SEO_FILE, JSON.stringify(backup.seo_overrides, null, 2), "utf-8");
+    }
+    if (backup.custom_products) {
+      fs.writeFileSync(CUSTOM_PRODUCTS_FILE, JSON.stringify(backup.custom_products, null, 2), "utf-8");
+    }
+    if (backup.product_details_enriched) {
+      fs.writeFileSync(ENRICHED_FILE, JSON.stringify(backup.product_details_enriched, null, 2), "utf-8");
+    }
+
+    // Reset caching to apply immediately
+    cacheTimestamp = 0;
+
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ error: "Failed to import backup: " + error.message });
+  }
+});
+
 app.post("/api/config", (req, res) => {
   const { customLogoUrl, allLogos } = req.body;
   const config = getSiteConfig();

@@ -11,6 +11,7 @@ import { EviLogo } from "./components/EviLogo";
 import { AdminLogoManager } from "./components/AdminLogoManager";
 import { ProductPriceManager } from "./components/ProductPriceManager";
 import { AdminSeoManager } from "./components/AdminSeoManager";
+import { AdminBackupManager } from "./components/AdminBackupManager";
 import { AboutUs } from "./components/AboutUs";
 import { LegalDocs } from "./components/LegalDocs";
 import { ContactsView } from "./components/ContactsView";
@@ -131,7 +132,7 @@ export default function App() {
     window.location.pathname === "/admin" || window.location.pathname === "/editor" || window.location.search.includes("admin=true")
   );
   
-  const [adminTab, setAdminTab] = useState<"tilda" | "images" | "logos" | "parser" | "catalog_preview" | "prices" | "seo">("tilda");
+  const [adminTab, setAdminTab] = useState<"tilda" | "images" | "logos" | "parser" | "catalog_preview" | "prices" | "seo" | "backup">("tilda");
   const [syncTime, setSyncTime] = useState<string>("");
 
   // Client pages state
@@ -142,6 +143,38 @@ export default function App() {
   const [comparedSlugs, setComparedSlugs] = useState<string[]>([]);
   const [isCompareModalOpen, setIsCompareModalOpen] = useState<boolean>(false);
   const [seoOverrides, setSeoOverrides] = useState<Record<string, SeoOverride>>({});
+  
+  const [hasBrowserBackup, setHasBrowserBackup] = useState<boolean>(false);
+  const [isServerReset, setIsServerReset] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (isAdmin) {
+      try {
+        const backup = localStorage.getItem("evi_catalog_backup");
+        if (backup) {
+          setHasBrowserBackup(true);
+          // Check if server is currently default
+          fetch("/api/admin/backup/export")
+            .then(res => res.json())
+            .then(data => {
+              const hasCustomLogo = data.site_config?.customLogoUrl && data.site_config.customLogoUrl !== "/logo.png";
+              const hasCustomImages = data.product_images && Object.keys(data.product_images).length > 0;
+              const hasCorrections = data.price_corrections && Object.keys(data.price_corrections).length > 0;
+              const hasSeo = data.seo_overrides && Object.keys(data.seo_overrides).length > 0;
+              
+              if (!hasCustomLogo && !hasCustomImages && !hasCorrections && !hasSeo) {
+                setIsServerReset(true);
+              } else {
+                setIsServerReset(false);
+              }
+            })
+            .catch(err => console.error("Error checking backup status:", err));
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    }
+  }, [isAdmin, adminTab, logoUrl]);
   
   const [filters, setFilters] = useState<FilterState>({
     search: "",
@@ -299,6 +332,28 @@ export default function App() {
       }
     } catch (e) {
       console.error("Error loading SEO overrides:", e);
+    }
+  };
+
+  const handleRestoreFromBanner = async () => {
+    try {
+      const backup = localStorage.getItem("evi_catalog_backup");
+      if (!backup) return;
+      const res = await fetch("/api/admin/backup/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: backup,
+      });
+      if (res.ok) {
+        setIsServerReset(false);
+        loadData(true);
+        loadLogoConfig();
+        loadSeoOverrides();
+        alert("Все настройки успешно восстановлены!");
+      }
+    } catch (e) {
+      console.error(e);
+      alert("Не удалось восстановить настройки.");
     }
   };
 
@@ -528,6 +583,25 @@ export default function App() {
             </div>
           </header>
 
+          {/* Server Reset Detected banner */}
+          {hasBrowserBackup && isServerReset && (
+            <div className="mb-6 rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+              <div className="flex items-center gap-3 text-xs text-zinc-300">
+                <ShieldAlert className="h-5 w-5 text-amber-500 shrink-0" />
+                <div>
+                  <span className="font-bold text-white uppercase tracking-wider font-mono mr-2">Обнаружен сброс сервера!</span>
+                  Поскольку хостинг Render стирает файлы при перезапуске, ваши настройки сбросились. Но в вашем браузере сохранена автокопия!
+                </div>
+              </div>
+              <button
+                onClick={handleRestoreFromBanner}
+                className="rounded bg-amber-500 hover:bg-amber-400 px-4 py-2 text-xs font-bold text-zinc-950 uppercase tracking-wider transition-all cursor-pointer whitespace-nowrap shrink-0"
+              >
+                Восстановить в 1 клик
+              </button>
+            </div>
+          )}
+
           {/* Admin Tabs */}
           <div className="mb-6 flex border-b border-zinc-900 overflow-x-auto">
             <button
@@ -597,6 +671,17 @@ export default function App() {
               Управление SEO-тегами
             </button>
             <button
+              onClick={() => setAdminTab("backup")}
+              className={`flex items-center gap-2 border-b-2 px-6 py-3.5 text-xs font-bold uppercase tracking-wider transition-all cursor-pointer shrink-0 ${
+                adminTab === "backup"
+                  ? "border-[#D3A76C] text-[#D3A76C]"
+                  : "border-transparent text-zinc-400 hover:border-zinc-800 hover:text-white"
+              }`}
+            >
+              <Database className="h-4 w-4" />
+              Бэкап и сохранность настроек
+            </button>
+            <button
               onClick={() => setAdminTab("catalog_preview")}
               className={`flex items-center gap-2 border-b-2 px-6 py-3.5 text-xs font-bold uppercase tracking-wider transition-all cursor-pointer shrink-0 ${
                 adminTab === "catalog_preview"
@@ -641,6 +726,14 @@ export default function App() {
             />
           ) : adminTab === "seo" ? (
             <AdminSeoManager products={products} onRefreshSeo={loadSeoOverrides} />
+          ) : adminTab === "backup" ? (
+            <AdminBackupManager 
+              onRestoreComplete={() => {
+                loadData(true);
+                loadLogoConfig();
+                loadSeoOverrides();
+              }} 
+            />
           ) : (
             <div>
               <div className="mb-4 rounded border border-[#D3A76C]/20 bg-[#D3A76C]/5 p-4 text-xs text-zinc-300 flex items-center justify-between">
