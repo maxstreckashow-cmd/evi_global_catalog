@@ -64,14 +64,20 @@ export const ProductDetails: React.FC<ProductDetailsProps> = ({ product, onBack,
   return (
     <div id="product-details-container" className="space-y-6 animate-fade-in">
       {/* Back navigation */}
-      <button 
+      <a 
         id="btn-back"
-        onClick={onBack}
+        href="/"
+        onClick={(e) => {
+          if (e.button === 0 && !e.ctrlKey && !e.metaKey) {
+            e.preventDefault();
+            onBack();
+          }
+        }}
         className="inline-flex items-center gap-2 rounded border border-zinc-800 bg-zinc-950/40 hover:bg-zinc-900 px-4 py-2 text-sm font-bold text-zinc-300 transition-all cursor-pointer hover:text-white"
       >
         <ArrowLeft className="h-4 w-4 text-[#D3A76C]" />
         Назад в каталог
-      </button>
+      </a>
 
       {/* Main Grid Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

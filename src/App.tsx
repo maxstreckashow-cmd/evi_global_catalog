@@ -63,6 +63,64 @@ declare global {
   }
 }
 
+function getCoinsForAlgorithm(algorithm: string): string {
+  const algo = (algorithm || "").toLowerCase();
+  if (algo.includes("scrypt")) return "Litecoin";
+  if (algo.includes("sha-256") || algo.includes("sha256")) return "Bitcoin";
+  if (algo.includes("kheavyhash") || algo.includes("kaspa")) return "Kaspa";
+  if (algo.includes("blake3")) return "Alephium";
+  if (algo.includes("kadena")) return "Kadena";
+  if (algo.includes("eaglesong")) return "Nervos";
+  if (algo.includes("handshake")) return "Handshake";
+  if (algo.includes("equihash")) return "Zcash";
+  if (algo.includes("x11")) return "Dash";
+  if (algo.includes("etchash") || algo.includes("ethash")) return "Ethereum Classic";
+  return "";
+}
+
+function generateDefaultSeo(product: Product) {
+  const hashrate = product.hashrate || "";
+  const model = product.model || "";
+  const algo = product.algorithm || "";
+  const coin = getCoinsForAlgorithm(algo);
+  const mfr = product.manufacturer || "";
+
+  const coinStr = coin ? `${coin}. ` : "";
+
+  const title = `${model} ${hashrate}. ASIC-устройство. ${algo}`;
+  const description = `${model} ${hashrate}. ASIC-устройство. ${algo}. ${coinStr}${mfr}. EVI Global Group`;
+
+  const kws = ["EVI Global Group", "майнинг", "устройство", "майнер", "ASIC"];
+  if (hashrate) {
+    const cleanHashForKw = hashrate.replace(/\s+/g, "").replace(/\//g, "");
+    kws.push(cleanHashForKw);
+    if (hashrate.includes(" ")) {
+      kws.push(hashrate);
+    }
+  }
+  if (algo) {
+    kws.push(algo);
+  }
+  if (coin) {
+    kws.push(coin);
+  }
+  if (mfr) {
+    kws.push(mfr);
+  }
+  const modelParts = model.trim().split(/\s+/);
+  if (modelParts.length > 0) {
+    modelParts.forEach((part) => {
+      if (part && !kws.includes(part)) {
+        kws.push(part);
+      }
+    });
+  }
+
+  const keywords = kws.join(", ");
+
+  return { title, description, keywords };
+}
+
 export default function App() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -92,6 +150,43 @@ export default function App() {
     algorithm: "",
     hasPrice: false,
   });
+
+  const handlePathRouting = (pathname: string, productList: Product[] = products) => {
+    const pathIsAdmin = pathname === "/admin" || pathname === "/editor";
+    setIsAdmin(pathIsAdmin);
+
+    if (pathname === "/about") {
+      setActivePage("about");
+      setSelectedProduct(null);
+    } else if (pathname === "/legal") {
+      setActivePage("legal");
+      setSelectedProduct(null);
+    } else if (pathname === "/contacts") {
+      setActivePage("contacts");
+      setSelectedProduct(null);
+    } else {
+      const match = pathname.match(/^\/product\/([^/]+)$/);
+      if (match) {
+        const slug = decodeURIComponent(match[1]);
+        if (productList.length > 0) {
+          const found = productList.find((p) => p.slug === slug);
+          if (found) {
+            setSelectedProduct(found);
+            return;
+          }
+        }
+      }
+      setSelectedProduct(null);
+      setActivePage("catalog");
+    }
+  };
+
+  const handleNavigatePage = (page: "catalog" | "about" | "legal" | "contacts") => {
+    setActivePage(page);
+    setSelectedProduct(null);
+    window.history.pushState(null, "", page === "catalog" ? "/" : `/${page}`);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
 
   // Telegram WebApp Integration
   useEffect(() => {
@@ -175,15 +270,7 @@ export default function App() {
       setSyncTime(new Date().toLocaleTimeString());
 
       // Parse path for initial load
-      const path = window.location.pathname;
-      const match = path.match(/^\/product\/([^/]+)$/);
-      if (match) {
-        const slug = decodeURIComponent(match[1]);
-        const found = data.find((p) => p.slug === slug);
-        if (found) {
-          setSelectedProduct(found);
-        }
-      }
+      handlePathRouting(window.location.pathname, data);
     } catch (e) {
       console.error("Error loading products:", e);
     } finally {
@@ -215,7 +302,7 @@ export default function App() {
     }
   };
 
-  // Load products and handle deep-linked product URLs
+  // Load products and handle deep-linked URLs
   useEffect(() => {
     loadData();
     loadLogoConfig();
@@ -223,33 +310,21 @@ export default function App() {
 
     // Support browser Back/Forward routing
     const handlePopState = () => {
-      const path = window.location.pathname;
-      const pathIsAdmin = path === "/admin" || path === "/editor";
-      setIsAdmin(pathIsAdmin);
-
-      const match = path.match(/^\/product\/([^/]+)$/);
-      if (match) {
-        const slug = decodeURIComponent(match[1]);
-        const found = products.find((p) => p.slug === slug);
-        if (found) {
-          setSelectedProduct(found);
-        }
-      } else {
-        setSelectedProduct(null);
-      }
+      handlePathRouting(window.location.pathname);
     };
 
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
-  }, []);
+  }, [products]);
 
   // Dynamically update document head when selected product or SEO overrides change
   useEffect(() => {
     if (selectedProduct) {
       const override = seoOverrides[selectedProduct.slug] || {};
-      const title = override.title || `Купить ASIC-майнер ${selectedProduct.manufacturer} ${selectedProduct.model} ${selectedProduct.hashrate ? selectedProduct.hashrate + " TH/s" : ""} - лучшая цена | EVI Global Group`;
-      const desc = override.description || `Официальные оптовые поставки ASIC-майнера ${selectedProduct.manufacturer} ${selectedProduct.model} (${selectedProduct.condition === 'New' ? 'новый' : 'Б/У'}) на алгоритме ${selectedProduct.algorithm} с хэшрейтом ${selectedProduct.hashrate} TH/s. Потребление: ${selectedProduct.power} кВт. Минимальный заказ от 30 устройств напрямую от производителя.`;
-      const keywords = override.keywords || `asic майнер, купить ${selectedProduct.manufacturer} ${selectedProduct.model}, ${selectedProduct.manufacturer} ${selectedProduct.model} цена, ${selectedProduct.algorithm} майнер, майнинг оборудование оптом, купить асики от 30 шт, evi global group, окупаемость майнера ${selectedProduct.payback} месяцев`;
+      const defaultSeo = generateDefaultSeo(selectedProduct);
+      const title = override.title || defaultSeo.title;
+      const desc = override.description || defaultSeo.description;
+      const keywords = override.keywords || defaultSeo.keywords;
 
       // Update client-side head
       document.title = title;
@@ -310,15 +385,7 @@ export default function App() {
   // Update selected product when catalog list updates (if popstate happens before products load)
   useEffect(() => {
     if (products.length > 0) {
-      const path = window.location.pathname;
-      const match = path.match(/^\/product\/([^/]+)$/);
-      if (match) {
-        const slug = decodeURIComponent(match[1]);
-        const found = products.find((p) => p.slug === slug);
-        if (found) {
-          setSelectedProduct(found);
-        }
-      }
+      handlePathRouting(window.location.pathname, products);
     }
   }, [products]);
 
@@ -635,24 +702,30 @@ export default function App() {
           <header className="mb-8 border-b border-zinc-950 pb-5">
             <div className="flex items-center justify-between">
               {/* Logo */}
-              <div 
-                className="cursor-pointer" 
-                onClick={() => {
-                  handleSelectProduct(null);
-                  setActivePage("catalog");
-                  setMobileMenuOpen(false);
-                }} 
+              <a 
+                href="/" 
+                onClick={(e) => {
+                  if (e.button === 0 && !e.ctrlKey && !e.metaKey) {
+                    e.preventDefault();
+                    handleNavigatePage("catalog");
+                    setMobileMenuOpen(false);
+                  }
+                }}
+                className="cursor-pointer block"
                 title="На главную"
               >
                 <EviLogo logoUrl={logoUrl} height={44} />
-              </div>
+              </a>
 
               {/* Desktop Menu links as on evi-global.com */}
               <nav className="hidden md:flex items-center gap-1.5 lg:gap-3 text-[11px] lg:text-xs font-bold uppercase tracking-wider">
-                <button
-                  onClick={() => {
-                    handleSelectProduct(null);
-                    setActivePage("catalog");
+                <a
+                  href="/"
+                  onClick={(e) => {
+                    if (e.button === 0 && !e.ctrlKey && !e.metaKey) {
+                      e.preventDefault();
+                      handleNavigatePage("catalog");
+                    }
                   }}
                   className={`px-3 py-2 rounded transition-all cursor-pointer ${
                     activePage === "catalog" && !selectedProduct
@@ -661,11 +734,14 @@ export default function App() {
                   }`}
                 >
                   Оборудование
-                </button>
-                <button
-                  onClick={() => {
-                    handleSelectProduct(null);
-                    setActivePage("about");
+                </a>
+                <a
+                  href="/about"
+                  onClick={(e) => {
+                    if (e.button === 0 && !e.ctrlKey && !e.metaKey) {
+                      e.preventDefault();
+                      handleNavigatePage("about");
+                    }
                   }}
                   className={`px-3 py-2 rounded transition-all cursor-pointer ${
                     activePage === "about"
@@ -674,11 +750,14 @@ export default function App() {
                   }`}
                 >
                   О компании
-                </button>
-                <button
-                  onClick={() => {
-                    handleSelectProduct(null);
-                    setActivePage("legal");
+                </a>
+                <a
+                  href="/legal"
+                  onClick={(e) => {
+                    if (e.button === 0 && !e.ctrlKey && !e.metaKey) {
+                      e.preventDefault();
+                      handleNavigatePage("legal");
+                    }
                   }}
                   className={`px-3 py-2 rounded transition-all cursor-pointer ${
                     activePage === "legal"
@@ -687,11 +766,14 @@ export default function App() {
                   }`}
                 >
                   Правовая информация
-                </button>
-                <button
-                  onClick={() => {
-                    handleSelectProduct(null);
-                    setActivePage("contacts");
+                </a>
+                <a
+                  href="/contacts"
+                  onClick={(e) => {
+                    if (e.button === 0 && !e.ctrlKey && !e.metaKey) {
+                      e.preventDefault();
+                      handleNavigatePage("contacts");
+                    }
                   }}
                   className={`px-3 py-2 rounded transition-all cursor-pointer ${
                     activePage === "contacts"
@@ -700,7 +782,7 @@ export default function App() {
                   }`}
                 >
                   Контакты
-                </button>
+                </a>
                 <a
                   href="https://evi-global.com"
                   target="_blank"
@@ -725,11 +807,14 @@ export default function App() {
             {/* Mobile Navigation Drawer */}
             {mobileMenuOpen && (
               <div className="md:hidden mt-4 pt-4 border-t border-zinc-950/60 flex flex-col gap-1.5 animate-slide-down">
-                <button
-                  onClick={() => {
-                    handleSelectProduct(null);
-                    setActivePage("catalog");
-                    setMobileMenuOpen(false);
+                <a
+                  href="/"
+                  onClick={(e) => {
+                    if (e.button === 0 && !e.ctrlKey && !e.metaKey) {
+                      e.preventDefault();
+                      handleNavigatePage("catalog");
+                      setMobileMenuOpen(false);
+                    }
                   }}
                   className={`w-full text-left px-4 py-3 rounded text-xs font-bold uppercase tracking-wider transition-colors ${
                     activePage === "catalog" && !selectedProduct
@@ -738,12 +823,15 @@ export default function App() {
                   }`}
                 >
                   Оборудование (Каталог)
-                </button>
-                <button
-                  onClick={() => {
-                    handleSelectProduct(null);
-                    setActivePage("about");
-                    setMobileMenuOpen(false);
+                </a>
+                <a
+                  href="/about"
+                  onClick={(e) => {
+                    if (e.button === 0 && !e.ctrlKey && !e.metaKey) {
+                      e.preventDefault();
+                      handleNavigatePage("about");
+                      setMobileMenuOpen(false);
+                    }
                   }}
                   className={`w-full text-left px-4 py-3 rounded text-xs font-bold uppercase tracking-wider transition-colors ${
                     activePage === "about"
@@ -752,12 +840,15 @@ export default function App() {
                   }`}
                 >
                   О компании
-                </button>
-                <button
-                  onClick={() => {
-                    handleSelectProduct(null);
-                    setActivePage("legal");
-                    setMobileMenuOpen(false);
+                </a>
+                <a
+                  href="/legal"
+                  onClick={(e) => {
+                    if (e.button === 0 && !e.ctrlKey && !e.metaKey) {
+                      e.preventDefault();
+                      handleNavigatePage("legal");
+                      setMobileMenuOpen(false);
+                    }
                   }}
                   className={`w-full text-left px-4 py-3 rounded text-xs font-bold uppercase tracking-wider transition-colors ${
                     activePage === "legal"
@@ -766,12 +857,15 @@ export default function App() {
                   }`}
                 >
                   Правовая информация
-                </button>
-                <button
-                  onClick={() => {
-                    handleSelectProduct(null);
-                    setActivePage("contacts");
-                    setMobileMenuOpen(false);
+                </a>
+                <a
+                  href="/contacts"
+                  onClick={(e) => {
+                    if (e.button === 0 && !e.ctrlKey && !e.metaKey) {
+                      e.preventDefault();
+                      handleNavigatePage("contacts");
+                      setMobileMenuOpen(false);
+                    }
                   }}
                   className={`w-full text-left px-4 py-3 rounded text-xs font-bold uppercase tracking-wider transition-colors ${
                     activePage === "contacts"
@@ -780,7 +874,7 @@ export default function App() {
                   }`}
                 >
                   Контакты
-                </button>
+                </a>
                 <a
                   href="https://evi-global.com"
                   target="_blank"
@@ -866,39 +960,45 @@ export default function App() {
               &copy; {new Date().getFullYear()} АО «ЭВИ ГЛОБАЛ ГРУПП». Все права защищены.
             </div>
 
-            <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1.5">
-              <button
-                onClick={() => {
-                  handleSelectProduct(null);
-                  setActivePage("legal");
-                  window.scrollTo({ top: 0, behavior: "smooth" });
+            <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1.5 font-semibold">
+              <a
+                href="/legal"
+                onClick={(e) => {
+                  if (e.button === 0 && !e.ctrlKey && !e.metaKey) {
+                    e.preventDefault();
+                    handleNavigatePage("legal");
+                  }
                 }}
-                className="hover:text-zinc-400 transition-colors cursor-pointer"
+                className="hover:text-[#D3A76C] transition-colors cursor-pointer"
               >
                 Политика конфиденциальности
-              </button>
+              </a>
               <span>•</span>
-              <button
-                onClick={() => {
-                  handleSelectProduct(null);
-                  setActivePage("legal");
-                  window.scrollTo({ top: 0, behavior: "smooth" });
+              <a
+                href="/legal"
+                onClick={(e) => {
+                  if (e.button === 0 && !e.ctrlKey && !e.metaKey) {
+                    e.preventDefault();
+                    handleNavigatePage("legal");
+                  }
                 }}
-                className="hover:text-zinc-400 transition-colors cursor-pointer"
+                className="hover:text-[#D3A76C] transition-colors cursor-pointer"
               >
                 Пользовательское соглашение
-              </button>
+              </a>
               <span>•</span>
-              <button
-                onClick={() => {
-                  handleSelectProduct(null);
-                  setActivePage("contacts");
-                  window.scrollTo({ top: 0, behavior: "smooth" });
+              <a
+                href="/contacts"
+                onClick={(e) => {
+                  if (e.button === 0 && !e.ctrlKey && !e.metaKey) {
+                    e.preventDefault();
+                    handleNavigatePage("contacts");
+                  }
                 }}
-                className="hover:text-zinc-400 transition-colors cursor-pointer"
+                className="hover:text-[#D3A76C] transition-colors cursor-pointer"
               >
                 Контакты
-              </button>
+              </a>
             </div>
           </footer>
         </div>

@@ -112,9 +112,20 @@ export const ProductCard: React.FC<ProductCardProps> = ({
         <div className="text-[10px] font-mono font-bold tracking-widest text-[#D3A76C] uppercase mb-1">
           {product.manufacturer}
         </div>
-        <h3 className="line-clamp-2 text-base font-extrabold tracking-tight text-white group-hover:text-[#D3A76C] transition-colors duration-300 uppercase">
-          {product.model}
-        </h3>
+        <a 
+          href={`/product/${product.slug}`}
+          onClick={(e) => {
+            if (e.button === 0 && !e.ctrlKey && !e.metaKey) {
+              e.preventDefault();
+              onSelect(product);
+            }
+          }}
+          className="block group-hover:text-[#D3A76C] transition-colors duration-300"
+        >
+          <h3 className="line-clamp-2 text-base font-extrabold tracking-tight text-white group-hover:text-[#D3A76C] transition-colors duration-300 uppercase">
+            {product.model}
+          </h3>
+        </a>
         <p className="mt-1 text-[10px] font-mono text-zinc-600">
           ID: {product.slug}
         </p>
@@ -191,16 +202,20 @@ export const ProductCard: React.FC<ProductCardProps> = ({
           )}
         </div>
 
-        <button 
+        <a 
           id={`btn-details-${product.slug}`}
+          href={`/product/${product.slug}`}
           onClick={(e) => {
             e.stopPropagation();
-            onSelect(product);
+            if (e.button === 0 && !e.ctrlKey && !e.metaKey) {
+              e.preventDefault();
+              onSelect(product);
+            }
           }}
-          className="w-full rounded bg-zinc-900 border border-zinc-800 hover:border-[#D3A76C] hover:bg-[#D3A76C] hover:text-[#0F0D09] px-4 py-2.5 text-center text-xs font-bold text-zinc-300 transition-all duration-300 cursor-pointer uppercase tracking-wider"
+          className="block w-full rounded bg-zinc-900 border border-zinc-800 hover:border-[#D3A76C] hover:bg-[#D3A76C] hover:text-[#0F0D09] px-4 py-2.5 text-center text-xs font-bold text-zinc-300 transition-all duration-300 cursor-pointer uppercase tracking-wider"
         >
           Подробнее
-        </button>
+        </a>
       </div>
     </div>
   );

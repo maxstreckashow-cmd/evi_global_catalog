@@ -1349,6 +1349,64 @@ app.get("/api/catalog.yml", (req, res) => {
   res.redirect("/api/catalog.xml");
 });
 
+function getCoinsForAlgorithm(algorithm: string): string {
+  const algo = (algorithm || "").toLowerCase();
+  if (algo.includes("scrypt")) return "Litecoin";
+  if (algo.includes("sha-256") || algo.includes("sha256")) return "Bitcoin";
+  if (algo.includes("kheavyhash") || algo.includes("kaspa")) return "Kaspa";
+  if (algo.includes("blake3")) return "Alephium";
+  if (algo.includes("kadena")) return "Kadena";
+  if (algo.includes("eaglesong")) return "Nervos";
+  if (algo.includes("handshake")) return "Handshake";
+  if (algo.includes("equihash")) return "Zcash";
+  if (algo.includes("x11")) return "Dash";
+  if (algo.includes("etchash") || algo.includes("ethash")) return "Ethereum Classic";
+  return "";
+}
+
+function generateDefaultSeo(product: Product) {
+  const hashrate = product.hashrate || "";
+  const model = product.model || "";
+  const algo = product.algorithm || "";
+  const coin = getCoinsForAlgorithm(algo);
+  const mfr = product.manufacturer || "";
+
+  const coinStr = coin ? `${coin}. ` : "";
+
+  const title = `${model} ${hashrate}. ASIC-устройство. ${algo}`;
+  const description = `${model} ${hashrate}. ASIC-устройство. ${algo}. ${coinStr}${mfr}. EVI Global Group`;
+
+  const kws = ["EVI Global Group", "майнинг", "устройство", "майнер", "ASIC"];
+  if (hashrate) {
+    const cleanHashForKw = hashrate.replace(/\s+/g, "").replace(/\//g, "");
+    kws.push(cleanHashForKw);
+    if (hashrate.includes(" ")) {
+      kws.push(hashrate);
+    }
+  }
+  if (algo) {
+    kws.push(algo);
+  }
+  if (coin) {
+    kws.push(coin);
+  }
+  if (mfr) {
+    kws.push(mfr);
+  }
+  const modelParts = model.trim().split(/\s+/);
+  if (modelParts.length > 0) {
+    modelParts.forEach((part) => {
+      if (part && !kws.includes(part)) {
+        kws.push(part);
+      }
+    });
+  }
+
+  const keywords = kws.join(", ");
+
+  return { title, description, keywords };
+}
+
 // Start full-stack server
 async function startServer() {
   // Pre-fetch cache immediately on startup
@@ -1392,9 +1450,10 @@ async function startServer() {
             const overrides = getSeoOverrides();
             const override = overrides[product.slug] || {};
 
-            const seoTitle = override.title || `Купить ASIC-майнер ${product.manufacturer} ${product.model} ${product.hashrate ? product.hashrate + " TH/s" : ""} - лучшая цена | EVI Global Group`;
-            const seoDesc = override.description || `Официальные оптовые поставки ASIC-майнера ${product.manufacturer} ${product.model} (${product.condition === 'New' ? 'новый' : 'Б/У'}) на алгоритме ${product.algorithm} с хэшрейтом ${product.hashrate} TH/s. Потребление: ${product.power} кВт. Минимальный заказ от 30 устройств напрямую от производителя. Актуальные цены, быстрая доставка и профессиональный подбор в EVI Global Group.`;
-            const seoKeywords = override.keywords || `asic майнер, купить ${product.manufacturer} ${product.model}, ${product.manufacturer} ${product.model} цена, ${product.algorithm} майнер, майнинг оборудование оптом, купить асики от 30 шт, evi global group, окупаемость майнера ${product.payback} месяцев`;
+            const defaultSeo = generateDefaultSeo(product);
+            const seoTitle = override.title || defaultSeo.title;
+            const seoDesc = override.description || defaultSeo.description;
+            const seoKeywords = override.keywords || defaultSeo.keywords;
             const ogTitle = override.ogTitle || seoTitle;
             const ogDesc = override.ogDescription || seoDesc;
             const ogImg = override.ogImage || (product.imageUrl || "");
@@ -1450,9 +1509,10 @@ async function startServer() {
           const overrides = getSeoOverrides();
           const override = overrides[product.slug] || {};
 
-          const seoTitle = override.title || `Купить ASIC-майнер ${product.manufacturer} ${product.model} ${product.hashrate ? product.hashrate + " TH/s" : ""} - лучшая цена | EVI Global Group`;
-          const seoDesc = override.description || `Официальные оптовые поставки ASIC-майнера ${product.manufacturer} ${product.model} (${product.condition === 'New' ? 'новый' : 'Б/У'}) на алгоритме ${product.algorithm} с хэшрейтом ${product.hashrate} TH/s. Потребление: ${product.power} кВт. Минимальный заказ от 30 устройств напрямую от производителя. Актуальные цены, быстрая доставка и профессиональный подбор в EVI Global Group.`;
-          const seoKeywords = override.keywords || `asic майнер, купить ${product.manufacturer} ${product.model}, ${product.manufacturer} ${product.model} цена, ${product.algorithm} майнер, майнинг оборудование оптом, купить асики от 30 шт, evi global group, окупаемость майнера ${product.payback} месяцев`;
+          const defaultSeo = generateDefaultSeo(product);
+          const seoTitle = override.title || defaultSeo.title;
+          const seoDesc = override.description || defaultSeo.description;
+          const seoKeywords = override.keywords || defaultSeo.keywords;
           const ogTitle = override.ogTitle || seoTitle;
           const ogDesc = override.ogDescription || seoDesc;
           const ogImg = override.ogImage || (product.imageUrl || "");
