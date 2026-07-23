@@ -4,6 +4,7 @@ import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import Papa from "papaparse";
 import { GoogleGenAI, Type } from "@google/genai";
+import { createCanvas, loadImage } from "@napi-rs/canvas";
 
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
@@ -296,18 +297,29 @@ const CONFIG_FILE = path.resolve(".", "site_config.json");
 interface SiteConfig {
   customLogoUrl: string;
   allLogos: string[];
+  customFaviconUrl?: string;
+  allFavicons?: string[];
 }
 
 function getSiteConfig(): SiteConfig {
   try {
     if (fs.existsSync(CONFIG_FILE)) {
       const data = fs.readFileSync(CONFIG_FILE, "utf-8");
-      return JSON.parse(data);
+      const parsed = JSON.parse(data);
+      if (!parsed.allFavicons) {
+        parsed.allFavicons = ["/favicon.ico"];
+      }
+      return parsed;
     }
   } catch (error) {
     console.error("Error reading site config:", error);
   }
-  return { customLogoUrl: "/logo.png", allLogos: ["/logo.png"] };
+  return { 
+    customLogoUrl: "/logo.png", 
+    allLogos: ["/logo.png"],
+    customFaviconUrl: "",
+    allFavicons: ["/favicon.ico"]
+  };
 }
 
 function saveSiteConfig(config: SiteConfig) {
@@ -315,6 +327,77 @@ function saveSiteConfig(config: SiteConfig) {
     fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), "utf-8");
   } catch (error) {
     console.error("Error saving site config:", error);
+  }
+}
+
+async function updateFaviconFiles(base64Data: string): Promise<boolean> {
+  try {
+    const base64Content = base64Data.split(";base64,").pop();
+    if (!base64Content) return false;
+    const buffer = Buffer.from(base64Content, "base64");
+
+    const writeFavicon = (filename: string, dataBuffer: Buffer) => {
+      const publicPath = path.resolve(".", "public", filename);
+      if (!fs.existsSync(path.dirname(publicPath))) {
+        fs.mkdirSync(path.dirname(publicPath), { recursive: true });
+      }
+      fs.writeFileSync(publicPath, dataBuffer);
+      
+      const distPath = path.resolve(".", "dist", filename);
+      if (fs.existsSync(path.resolve(".", "dist"))) {
+        fs.writeFileSync(distPath, dataBuffer);
+      }
+    };
+
+    const isIco = base64Data.includes("image/x-icon") || base64Data.includes("vnd.microsoft.icon") || base64Data.includes(".ico");
+
+    if (isIco) {
+      writeFavicon("favicon.ico", buffer);
+      
+      try {
+        const image = await loadImage(buffer);
+        
+        const canvas512 = createCanvas(512, 512);
+        const ctx512 = canvas512.getContext("2d");
+        ctx512.drawImage(image, 0, 0, 512, 512);
+        writeFavicon("favicon.png", canvas512.toBuffer("image/png"));
+
+        const canvas32 = createCanvas(32, 32);
+        const ctx32 = canvas32.getContext("2d");
+        ctx32.drawImage(image, 0, 0, 32, 32);
+        writeFavicon("favicon-32x32.png", canvas32.toBuffer("image/png"));
+      } catch (err) {
+        console.error("Canvas failed to decode ICO for PNG versions:", err);
+      }
+    } else {
+      const image = await loadImage(buffer);
+      
+      const canvas512 = createCanvas(512, 512);
+      const ctx512 = canvas512.getContext("2d");
+      ctx512.drawImage(image, 0, 0, 512, 512);
+      writeFavicon("favicon.png", canvas512.toBuffer("image/png"));
+
+      const canvas32 = createCanvas(32, 32);
+      const ctx32 = canvas32.getContext("2d");
+      ctx32.drawImage(image, 0, 0, 32, 32);
+      writeFavicon("favicon-32x32.png", canvas32.toBuffer("image/png"));
+      writeFavicon("favicon.ico", canvas32.toBuffer("image/png"));
+
+      const svgContent = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <image href="${base64Data}" x="0" y="0" width="512" height="512" />
+</svg>`;
+      const publicSvgPath = path.resolve(".", "public", "favicon.svg");
+      fs.writeFileSync(publicSvgPath, svgContent, "utf-8");
+      
+      const distSvgPath = path.resolve(".", "dist", "favicon.svg");
+      if (fs.existsSync(path.resolve(".", "dist"))) {
+        fs.writeFileSync(distSvgPath, svgContent, "utf-8");
+      }
+    }
+    return true;
+  } catch (error) {
+    console.error("Error updating favicon files:", error);
+    return false;
   }
 }
 
@@ -1243,11 +1326,18 @@ app.post("/api/admin/backup/import", (req, res) => {
   }
 });
 
-app.post("/api/config", (req, res) => {
-  const { customLogoUrl, allLogos } = req.body;
+app.post("/api/config", async (req, res) => {
+  const { customLogoUrl, allLogos, customFaviconUrl, allFavicons } = req.body;
   const config = getSiteConfig();
   if (customLogoUrl !== undefined) config.customLogoUrl = customLogoUrl;
   if (allLogos !== undefined) config.allLogos = allLogos;
+  if (customFaviconUrl !== undefined) {
+    config.customFaviconUrl = customFaviconUrl;
+    if (customFaviconUrl) {
+      await updateFaviconFiles(customFaviconUrl);
+    }
+  }
+  if (allFavicons !== undefined) config.allFavicons = allFavicons;
   saveSiteConfig(config);
   res.json({ success: true, config });
 });
@@ -1263,6 +1353,29 @@ app.post("/api/config/logo/upload", (req, res) => {
   }
   config.customLogoUrl = logoData;
   saveSiteConfig(config);
+  res.json({ success: true, config });
+});
+
+app.post("/api/config/favicon/upload", async (req, res) => {
+  const { faviconData } = req.body;
+  if (!faviconData) {
+    return res.status(400).json({ error: "Missing faviconData" });
+  }
+  const config = getSiteConfig();
+  if (!config.allFavicons) {
+    config.allFavicons = ["/favicon.ico"];
+  }
+  if (!config.allFavicons.includes(faviconData)) {
+    config.allFavicons.push(faviconData);
+  }
+  config.customFaviconUrl = faviconData;
+  saveSiteConfig(config);
+  
+  const success = await updateFaviconFiles(faviconData);
+  if (!success) {
+    return res.status(500).json({ error: "Failed to generate favicon files on disk" });
+  }
+  
   res.json({ success: true, config });
 });
 
@@ -1519,6 +1632,17 @@ function generateDefaultSeo(product: Product) {
 async function startServer() {
   // Pre-fetch cache immediately on startup
   await getProducts();
+
+  // Restore custom favicon on boot if saved in configuration
+  try {
+    const config = getSiteConfig();
+    if (config.customFaviconUrl) {
+      console.log("Restoring custom favicon from site configuration...");
+      await updateFaviconFiles(config.customFaviconUrl);
+    }
+  } catch (err) {
+    console.error("Failed to restore custom favicon on startup:", err);
+  }
 
   // Background auto-sync every 5 minutes to keep the catalog cache perpetually warm and fresh
   setInterval(async () => {

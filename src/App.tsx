@@ -653,7 +653,7 @@ export default function App() {
               }`}
             >
               <ImageIcon className="h-4 w-4 text-[#D3A76C]" />
-              Менеджер логотипов
+              Логотип и фавикон
             </button>
             <button
               onClick={() => setAdminTab("parser")}
