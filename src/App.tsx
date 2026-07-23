@@ -32,7 +32,9 @@ import {
   X,
   ExternalLink,
   DollarSign,
-  Globe
+  Globe,
+  Lock,
+  LogOut
 } from "lucide-react";
 
 declare global {
@@ -131,6 +133,16 @@ export default function App() {
   const [isAdmin, setIsAdmin] = useState<boolean>(
     window.location.pathname === "/admin" || window.location.pathname === "/editor" || window.location.search.includes("admin=true")
   );
+
+  const [adminPassword, setAdminPassword] = useState<string>("");
+  const [isAuthorized, setIsAuthorized] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("admin_authorized") === "true";
+    } catch (e) {
+      return false;
+    }
+  });
+  const [authError, setAuthError] = useState<string>("");
   
   const [adminTab, setAdminTab] = useState<"tilda" | "images" | "logos" | "parser" | "catalog_preview" | "prices" | "seo" | "backup">("tilda");
   const [syncTime, setSyncTime] = useState<string>("");
@@ -481,6 +493,32 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
+  const handleLoginSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (adminPassword === "EvI_GG_20167") {
+      setIsAuthorized(true);
+      setAuthError("");
+      try {
+        localStorage.setItem("admin_authorized", "true");
+      } catch (err) {
+        console.error(err);
+      }
+    } else {
+      setAuthError("Неверный пароль. Пожалуйста, попробуйте еще раз.");
+    }
+  };
+
+  const handleLogout = () => {
+    setIsAuthorized(false);
+    setAdminPassword("");
+    try {
+      localStorage.removeItem("admin_authorized");
+    } catch (err) {
+      console.error(err);
+    }
+    handleNavigateAdmin(false);
+  };
+
   // State callback when an image is saved in the Manager
   const handleUpdateProductImage = (slug: string, imageUrl: string) => {
     setProducts((prev) =>
@@ -552,7 +590,67 @@ export default function App() {
       {/* 1. ADMIN / EDITOR INTERFACE               */}
       {/* ========================================= */}
       {isAdmin ? (
-        <div id="admin-panel" className="space-y-6">
+        !isAuthorized ? (
+          <div className="flex min-h-[60vh] items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+            <div className="w-full max-w-md space-y-8 bg-zinc-950/40 border border-zinc-850 p-8 rounded-2xl shadow-2xl relative overflow-hidden">
+              {/* Background accent glow */}
+              <div className="absolute inset-0 bg-[radial-gradient(#D3A76C0c_1px,transparent_1px)] [background-size:16px_16px] pointer-events-none opacity-40"></div>
+              
+              <div className="flex flex-col items-center relative z-10">
+                <EviLogo logoUrl={logoUrl} height={50} />
+                <div className="mt-6 flex h-12 w-12 items-center justify-center rounded-full bg-[#D3A76C]/10 border border-[#D3A76C]/20">
+                  <Lock className="h-5 w-5 text-[#D3A76C]" />
+                </div>
+                <h2 className="mt-4 text-center text-xl font-black text-white uppercase tracking-tight">
+                  Вход в панель управления
+                </h2>
+                <p className="mt-1 text-center text-xs text-zinc-400">
+                  Для доступа к настройкам введите пароль администратора
+                </p>
+              </div>
+
+              <form onSubmit={handleLoginSubmit} className="mt-6 space-y-4 relative z-10">
+                {authError && (
+                  <div className="rounded border border-rose-500/20 bg-rose-500/5 p-3 text-xs text-rose-400 text-center">
+                    {authError}
+                  </div>
+                )}
+                
+                <div className="space-y-1">
+                  <label htmlFor="password-input" className="text-[10px] font-mono font-bold uppercase tracking-wider text-zinc-400">
+                    Пароль
+                  </label>
+                  <input
+                    id="password-input"
+                    type="password"
+                    required
+                    value={adminPassword}
+                    onChange={(e) => setAdminPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className="block w-full rounded border border-zinc-850 bg-zinc-950/60 hover:bg-zinc-950 hover:border-zinc-700 focus:border-[#D3A76C] focus:ring-1 focus:ring-[#D3A76C] px-3.5 py-2.5 text-sm text-white placeholder-zinc-600 transition-all outline-none"
+                  />
+                </div>
+
+                <div className="flex gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => handleNavigateAdmin(false)}
+                    className="flex-1 rounded border border-zinc-850 bg-zinc-900/40 hover:bg-zinc-800 text-zinc-300 px-4 py-2.5 text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer text-center"
+                  >
+                    На главную
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 rounded bg-[#D3A76C] hover:bg-[#E7C08B] hover:text-[#0F0D09] text-[#0F0D09] px-4 py-2.5 text-xs font-bold uppercase tracking-wider transition-all cursor-pointer text-center"
+                  >
+                    Войти
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        ) : (
+          <div id="admin-panel" className="space-y-6">
           <header className="mb-6 border-b border-zinc-900 pb-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div>
               <div className="flex items-center gap-2">
@@ -597,6 +695,15 @@ export default function App() {
               >
                 <span>Клиентский виджет</span>
                 <ArrowUpRight className="h-3.5 w-3.5" />
+              </button>
+
+              <button
+                onClick={handleLogout}
+                className="flex items-center gap-1.5 rounded border border-rose-500/20 bg-rose-500/5 hover:bg-rose-500/15 text-rose-400 px-4 py-2 text-xs font-bold transition-all cursor-pointer uppercase tracking-wider"
+                title="Выйти из панели администратора"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+                <span>Выйти</span>
               </button>
             </div>
           </header>
@@ -801,6 +908,7 @@ export default function App() {
             </div>
           )}
         </div>
+        )
       ) : (
         
         // ========================================= //
