@@ -383,6 +383,15 @@ export default function App() {
 
       // Update client-side head
       document.title = title;
+
+      // Update canonical link
+      let linkCanonical = document.querySelector('link[rel="canonical"]');
+      if (!linkCanonical) {
+        linkCanonical = document.createElement('link');
+        linkCanonical.setAttribute('rel', 'canonical');
+        document.head.appendChild(linkCanonical);
+      }
+      linkCanonical.setAttribute('href', `https://catalog.evi-global.com/product/${selectedProduct.slug}`);
       
       // Update meta description
       let metaDesc = document.querySelector('meta[name="description"]');
@@ -433,7 +442,16 @@ export default function App() {
       }
     } else {
       // Default general title
-      document.title = "Каталог ASIC-майнеров | EVI Global Group";
+      document.title = "Каталог ASIC-майнеров | Цены на асики в наличии и под заказ | EVI Global Group";
+
+      // Reset canonical link
+      let linkCanonical = document.querySelector('link[rel="canonical"]');
+      if (!linkCanonical) {
+        linkCanonical = document.createElement('link');
+        linkCanonical.setAttribute('rel', 'canonical');
+        document.head.appendChild(linkCanonical);
+      }
+      linkCanonical.setAttribute('href', 'https://catalog.evi-global.com/');
     }
   }, [selectedProduct, seoOverrides]);
 

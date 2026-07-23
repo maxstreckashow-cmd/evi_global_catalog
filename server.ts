@@ -43,6 +43,56 @@ app.get("/googlecc41abc00d0391fc.html", (req, res) => {
   res.send("google-site-verification: googlecc41abc00d0391fc.html");
 });
 
+// Explicit route for Robots.txt allowing all indexing
+app.get("/robots.txt", (req, res) => {
+  res.setHeader("Content-Type", "text/plain; charset=UTF-8");
+  res.send(`User-agent: *
+Allow: /
+Sitemap: https://catalog.evi-global.com/sitemap.xml
+Host: catalog.evi-global.com
+`);
+});
+
+// Dynamic Sitemap generating URLs for homepage and all specific products
+app.get("/sitemap.xml", async (req, res) => {
+  try {
+    const products = await getProducts();
+    const domain = "https://catalog.evi-global.com";
+    const today = new Date().toISOString().split("T")[0];
+
+    let xml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
+    xml += `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n`;
+
+    // Homepage
+    xml += `  <url>\n`;
+    xml += `    <loc>${domain}/</loc>\n`;
+    xml += `    <lastmod>${today}</lastmod>\n`;
+    xml += `    <changefreq>daily</changefreq>\n`;
+    xml += `    <priority>1.0</priority>\n`;
+    xml += `  </url>\n`;
+
+    // Dynamic Product Pages
+    for (const product of products) {
+      if (product.slug) {
+        xml += `  <url>\n`;
+        xml += `    <loc>${domain}/product/${product.slug}</loc>\n`;
+        xml += `    <lastmod>${today}</lastmod>\n`;
+        xml += `    <changefreq>weekly</changefreq>\n`;
+        xml += `    <priority>0.8</priority>\n`;
+        xml += `  </url>\n`;
+      }
+    }
+
+    xml += `</urlset>`;
+
+    res.setHeader("Content-Type", "application/xml; charset=UTF-8");
+    res.send(xml);
+  } catch (error: any) {
+    console.error("Error generating sitemap:", error);
+    res.status(500).send("Error generating sitemap");
+  }
+});
+
 // Dynamic Cache for Spreadsheet Data
 interface Product {
   manufacturer: string;
@@ -1515,27 +1565,58 @@ async function startServer() {
             const ogTitle = override.ogTitle || seoTitle;
             const ogDesc = override.ogDescription || seoDesc;
             const ogImg = override.ogImage || (product.imageUrl || "");
+            const canonicalUrl = `https://catalog.evi-global.com/product/${product.slug}`;
+
+            const productSchema = {
+              "@context": "https://schema.org/",
+              "@type": "Product",
+              "name": product.model,
+              "image": ogImg || "",
+              "description": seoDesc,
+              "brand": {
+                "@type": "Brand",
+                "name": product.manufacturer
+              },
+              "offers": {
+                "@type": "Offer",
+                "url": canonicalUrl,
+                "priceCurrency": "USD",
+                "price": product.priceUsdNumeric || 0,
+                "availability": "https://schema.org/InStock",
+                "itemCondition": product.condition === "New" ? "https://schema.org/NewCondition" : "https://schema.org/UsedCondition"
+              }
+            };
 
             // Inject custom SEO head tags
             const seoMeta = `
               <title>${seoTitle}</title>
               <meta name="description" content="${seoDesc}" />
               <meta name="keywords" content="${seoKeywords}" />
+              <link rel="canonical" href="${canonicalUrl}" />
               <meta property="og:title" content="${ogTitle}" />
               <meta property="og:description" content="${ogDesc}" />
               <meta property="og:type" content="product" />
-              <meta property="og:url" content="${(process.env.APP_URL || '').replace(/\/$/, '') || 'http://localhost:3000'}/product/${product.slug}" />
+              <meta property="og:url" content="${canonicalUrl}" />
               ${ogImg ? `<meta property="og:image" content="${ogImg}" />` : ''}
               <meta name="twitter:card" content="summary_large_image" />
               <meta name="twitter:title" content="${ogTitle}" />
               <meta name="twitter:description" content="${ogDesc}" />
               ${ogImg ? `<meta name="twitter:image" content="${ogImg}" />` : ''}
+              <script type="application/ld+json">
+                ${JSON.stringify(productSchema)}
+              </script>
             `;
 
-            // Replace standard title or insert in head
-            const htmlWithSEO = template
-              .replace("<title>My Google AI Studio App</title>", seoMeta)
-              .replace("<head>", `<head>${seoMeta}`);
+            // Clean up default homepage tags to avoid duplicates
+            const cleanedTemplate = template
+              .replace(/<title>.*?<\/title>/i, "")
+              .replace(/<link\s+rel="canonical"\s+href=".*?"\s*\/?>/gi, "")
+              .replace(/<meta\s+name="description"\s+content=".*?"\s*\/?>/gi, "")
+              .replace(/<meta\s+name="keywords"\s+content=".*?"\s*\/?>/gi, "")
+              .replace(/<meta\s+property="og:.*?"\s+content=".*?"\s*\/?>/gi, "")
+              .replace(/<meta\s+name="twitter:.*?"\s+content=".*?"\s*\/?>/gi, "");
+
+            const htmlWithSEO = cleanedTemplate.replace("<head>", `<head>\n${seoMeta}`);
 
             return res.status(200).set({ "Content-Type": "text/html" }).end(htmlWithSEO);
           } catch (e) {
@@ -1574,25 +1655,57 @@ async function startServer() {
           const ogTitle = override.ogTitle || seoTitle;
           const ogDesc = override.ogDescription || seoDesc;
           const ogImg = override.ogImage || (product.imageUrl || "");
+          const canonicalUrl = `https://catalog.evi-global.com/product/${product.slug}`;
+
+          const productSchema = {
+            "@context": "https://schema.org/",
+            "@type": "Product",
+            "name": product.model,
+            "image": ogImg || "",
+            "description": seoDesc,
+            "brand": {
+              "@type": "Brand",
+              "name": product.manufacturer
+            },
+            "offers": {
+              "@type": "Offer",
+              "url": canonicalUrl,
+              "priceCurrency": "USD",
+              "price": product.priceUsdNumeric || 0,
+              "availability": "https://schema.org/InStock",
+              "itemCondition": product.condition === "New" ? "https://schema.org/NewCondition" : "https://schema.org/UsedCondition"
+            }
+          };
 
           const seoMeta = `
             <title>${seoTitle}</title>
             <meta name="description" content="${seoDesc}" />
             <meta name="keywords" content="${seoKeywords}" />
+            <link rel="canonical" href="${canonicalUrl}" />
             <meta property="og:title" content="${ogTitle}" />
             <meta property="og:description" content="${ogDesc}" />
             <meta property="og:type" content="product" />
-            <meta property="og:url" content="${(process.env.APP_URL || '').replace(/\/$/, '') || 'http://localhost:3000'}/product/${product.slug}" />
+            <meta property="og:url" content="${canonicalUrl}" />
             ${ogImg ? `<meta property="og:image" content="${ogImg}" />` : ''}
             <meta name="twitter:card" content="summary_large_image" />
             <meta name="twitter:title" content="${ogTitle}" />
             <meta name="twitter:description" content="${ogDesc}" />
             ${ogImg ? `<meta name="twitter:image" content="${ogImg}" />` : ''}
+            <script type="application/ld+json">
+              ${JSON.stringify(productSchema)}
+            </script>
           `;
 
-          const htmlWithSEO = template
-            .replace("<title>My Google AI Studio App</title>", seoMeta)
-            .replace("<head>", `<head>${seoMeta}`);
+          // Clean up default homepage tags to avoid duplicates
+          const cleanedTemplate = template
+            .replace(/<title>.*?<\/title>/i, "")
+            .replace(/<link\s+rel="canonical"\s+href=".*?"\s*\/?>/gi, "")
+            .replace(/<meta\s+name="description"\s+content=".*?"\s*\/?>/gi, "")
+            .replace(/<meta\s+name="keywords"\s+content=".*?"\s*\/?>/gi, "")
+            .replace(/<meta\s+property="og:.*?"\s+content=".*?"\s*\/?>/gi, "")
+            .replace(/<meta\s+name="twitter:.*?"\s+content=".*?"\s*\/?>/gi, "");
+
+          const htmlWithSEO = cleanedTemplate.replace("<head>", `<head>\n${seoMeta}`);
 
           return res.status(200).set({ "Content-Type": "text/html" }).end(htmlWithSEO);
         } catch (e) {
